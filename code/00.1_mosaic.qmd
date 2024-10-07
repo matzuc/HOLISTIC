@@ -5,20 +5,112 @@ format: html
 
 ## librerie
 
-
-## Running Code
-
-When you click the **Render** button a document will be generated that includes both content and the output of embedded code. You can embed code like this:
-
 ```{r}
-1 + 1
+library(raster)
+library(stringr)
+library(dplyr)
 ```
 
-You can add options to executable code like this 
+
+
+# files
 
 ```{r}
-#| echo: false
-2 * 2
+files <- data.frame(fn = unlist(list.files(here::here("out", "pred/"), full.names = F)))
+
+images <- files |> 
+	filter(str_detect(fn, ".wld")) |>
+	mutate(fn = str_remove(fn, ".wld")) |> 
+	mutate(jpg = paste0(fn, ".jpg")) 
+	
+
+jpgs <- files |>
+	mutate(jpg = fn) |>
+	filter(str_detect(fn, ".jpg"), !str_detect(fn, "aux")) |> 
+	mutate(fn = str_remove(fn, ".jpg")) 
+
+wlds <- files |>
+	filter(str_detect(fn, ".wld")) |>
+	mutate(wld = fn) |> 
+	
+	mutate(fn = str_remove(fn, ".wld"))
+
+filesdf <- left_join(jpgs, wlds) |> 
+	filter(!is.na(wld)) 
+
 ```
 
-The `echo: false` option disables the printing of code (only output is displayed).
+
+```{r}
+
+# Funzione per caricare l'immagine georeferenziata da un file .jpg e .wld
+load_georeferenced_jpg <- function(jpg_file) {
+  
+  # Sostituisce l'estensione .jpg con .wld per trovare il file di georeferenziazione
+  wld_file <- sub("\\.jpg$", ".wld", jpg_file)
+  
+  # Leggi i valori dal file .wld
+  if (!file.exists(wld_file)) {
+    stop(paste("File .wld non trovato per:", jpg_file))
+  }
+  
+  # Leggi i valori dal file .wld
+  wld_vals <- scan(wld_file, quiet = TRUE)
+  
+  # Estrarre i valori dal file .wld
+  pixel_size_x <- wld_vals[1]  # Dimensione del pixel in direzione x
+  rotation_x <- wld_vals[2]    # Rotazione sull'asse x (di solito 0)
+  rotation_y <- wld_vals[3]    # Rotazione sull'asse y (di solito 0)
+  pixel_size_y <- wld_vals[4]  # Dimensione del pixel in direzione y (valore negativo)
+  upper_left_x <- wld_vals[5]  # Coordinata X del centro del pixel in alto a sinistra
+  upper_left_y <- wld_vals[6]  # Coordinata Y del centro del pixel in alto a sinistra
+  
+  # Carica il file immagine JPEG
+  r <- brick(jpg_file)
+  
+  # Calcola l'estensione (extent) dell'immagine
+  ncol_r <- ncol(r)
+  nrow_r <- nrow(r)
+  
+  xmin <- upper_left_x
+  xmax <- upper_left_x + (ncol_r * pixel_size_x)
+  ymax <- upper_left_y
+  ymin <- upper_left_y + (nrow_r * pixel_size_y)
+  
+  # Imposta l'estensione dell'immagine
+  extent(r) <- c(xmin, xmax, ymin, ymax)
+  
+  # Imposta il sistema di coordinate (esempio: WGS84)
+  crs(r) <- "+proj=longlat +datum=WGS84 +no_defs"
+  
+  return(r)
+}
+
+# Esempio di utilizzo:
+ jpg_file <- here::here("out", "pred", filesdf$jpg[1])
+
+  raster_image <- load_georeferenced_jpg(jpg_file)
+plot(raster_image)
+```
+
+
+
+list of rasters
+```{r}
+lr <- list()
+for (i in 1:nrow(filesdf)) {
+  jpg_file <- here::here("out", "pred", filesdf$jpg[i])
+  lr[[i]] <- load_georeferenced_jpg(jpg_file)
+}
+
+
+mosaico <- do.call(mosaic, c(lr, fun = max))
+
+plot(mosaico)
+
+
+```
+
+
+
+
